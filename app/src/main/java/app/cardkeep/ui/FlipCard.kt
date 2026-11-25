@@ -64,12 +64,16 @@ fun FlipCard(
     onCopy: (label: String, value: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Keep the last values while flipping back, so the back doesn't blank out mid-turn.
+    // Keep the last values only while the back face is visible; drop them from memory as soon as hidden or locked.
+    val locked = LocalLocked.current
     var shown by remember { mutableStateOf<SecretDraft?>(null) }
-    if (revealed != null) shown = revealed
+    if (revealed != null && !locked) shown = revealed
     val angle by animateFloatAsState(
-        if (revealed != null) 180f else 0f, tween(FLIP_MS, easing = FastOutSlowInEasing), label = "flip",
+        if (revealed != null && !locked) 180f else 0f, tween(FLIP_MS, easing = FastOutSlowInEasing), label = "flip",
     )
+    LaunchedEffect(revealed, locked, angle <= 90f) {
+        if (locked || (revealed == null && angle <= 90f)) shown = null
+    }
     Box(
         modifier.fillMaxWidth().graphicsLayer {
             rotationY = angle
@@ -98,6 +102,8 @@ object FlipBack {
     }
 
     fun done(p: Pending) { if (pending === p) pending = null }
+
+    fun clear() { pending = null }
 }
 
 /** The home card for [p]: starts face down and turns face up, in step with the move back into the stack. */

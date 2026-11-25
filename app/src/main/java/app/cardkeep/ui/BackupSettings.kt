@@ -82,7 +82,8 @@ fun BackupSection() {
         )
     }
 
-    if (exporting) {
+    val locked = LocalLocked.current
+    if (exporting && !locked) {
         var pw by remember { mutableStateOf("") }
         var pw2 by remember { mutableStateOf("") }
         val valid = pw.length >= 8 && pw == pw2
@@ -99,8 +100,8 @@ fun BackupSection() {
                 scope.launch {
                     busy = true
                     val r = runCatching {
-                        // Card numbers and CVVs are behind the fingerprint; unlock once for all of them.
-                        val secrets = Auth.withVault(activity, "Export backup") {
+                        // Card numbers and CVVs are behind the fingerprint; always confirm before exporting all secrets.
+                        val secrets = Auth.unlockVault(activity, "Export backup") {
                             withContext(Dispatchers.IO) {
                                 app.db.backup().secrets().associate { s -> s.cardId to Vault.decrypt(s) }
                             }
@@ -143,14 +144,20 @@ fun rememberRestoreBackup(onRestored: (Int) -> Unit = {}): () -> Unit {
     var opening by remember { mutableStateOf<ByteArray?>(null) } // picked file waiting for its password
     var ready by remember { mutableStateOf<Backup.Contents?>(null) } // decrypted, waiting for confirmation
     var busy by remember { mutableStateOf(false) }
+    val locked = LocalLocked.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
-            opening = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }
-            if (opening == null) toast(context, "Couldn't read that file")
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { readBounded(it, MAX_BACKUP_FILE_BYTES) }
+                }.getOrNull()
+            }
+            if (bytes == null) toast(context, "Couldn't read that file (or it is too large)")
+            else opening = bytes
         }
     }
 
-    opening?.let { file ->
+    opening?.takeIf { !locked }?.let { file ->
         var pw by remember { mutableStateOf("") }
         var error by remember { mutableStateOf<String?>(null) }
         EditSheet(
@@ -175,7 +182,7 @@ fun rememberRestoreBackup(onRestored: (Int) -> Unit = {}): () -> Unit {
         }
     }
 
-    ready?.let { c ->
+    ready?.takeIf { !locked }?.let { c ->
         val s = c.summary
         val made = Dates.long(Instant.ofEpochMilli(s.createdAt).atZone(ZoneId.systemDefault()).toLocalDate())
         ConfirmDialog(
@@ -190,9 +197,8 @@ fun rememberRestoreBackup(onRestored: (Int) -> Unit = {}): () -> Unit {
                     // Alarms are keyed by card id; the wipe would leave this phone's ones firing (maybe for another card).
                     val oldIds = app.db.backup().cards().map { it.id }
                     val n = runCatching {
-                        // Re-encrypt card secrets with this phone's own keys (needs an unlock). JSON and Keystore
-                        // work stays off the main thread; the prompt itself comes back to it.
-                        Auth.withVault(activity, "Restore backup") {
+                        // Always confirm identity before wiping the database and re-encrypting secrets.
+                        Auth.unlockVault(activity, "Restore backup") {
                             withContext(Dispatchers.Default) {
                                 Backup.restore(app.db, c, app.prefs) { d: SecretDraft ->
                                     Vault.encrypt(d).let { Backup.CardSecretBlobs(it.number, it.expiry, it.cvv, it.holder) }
@@ -229,6 +235,8 @@ private fun PasswordField(label: String, value: String, error: Boolean, hint: St
         modifier = Modifier.fillMaxWidth(),
     )
 }
+
+private const val MAX_BACKUP_FILE_BYTES = 50_000_000
 
 private suspend fun write(context: Context, uri: Uri, bytes: ByteArray) = withContext(Dispatchers.IO) {
     runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } != null }.getOrDefault(false)

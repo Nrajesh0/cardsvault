@@ -4,6 +4,7 @@ import android.app.assist.AssistStructure
 import android.content.Intent
 import android.os.Bundle
 import android.service.autofill.Dataset
+import android.view.WindowManager
 import android.view.autofill.AutofillManager
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withContext
 class AutofillUnlockActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         // Runs again after a rotation too: the old instance's flow died with it, and an invisible activity
         // that never finishes would swallow every tap. A prompt still on screen reconnects to this one.
         val cardId = intent.getLongExtra(EXTRA_CARD, 0L)

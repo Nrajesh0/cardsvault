@@ -57,6 +57,7 @@ import app.cardkeep.ui.DetailScreen
 import app.cardkeep.ui.CardsTheme
 import app.cardkeep.ui.EditScreen
 import app.cardkeep.ui.FIXABLE
+import app.cardkeep.ui.FlipBack
 import app.cardkeep.ui.importUri
 import app.cardkeep.ui.rememberPdfImporter
 import app.cardkeep.ui.HomeScreen
@@ -81,6 +82,8 @@ class MainActivity : FragmentActivity() {
         const val ACTION_SCAN_CARD = "com.cardssrj.app.action.SCAN_CARD"
         const val ACTION_TAP_CARD = "com.cardssrj.app.action.TAP_CARD"
         private const val SHORTCUT_ADD = "add"
+        // Process-local only (cleared on process death): preserves unlocked state across rotation/config changes.
+        private var configChangeUnlocked = false
     }
 
     @OptIn(ExperimentalSharedTransitionApi::class)
@@ -95,7 +98,10 @@ class MainActivity : FragmentActivity() {
         Appearance.mode = app.prefs.themeMode
         deviceSecure = Auth.deviceSecure(this)
         // Nothing to protect before the first-run screens are done, so no lock on a fresh install.
-        locked = deviceSecure && app.prefs.onboarded
+        // Only carry unlocked state across in-process configuration changes (e.g. rotation); process death always locks.
+        val keepUnlocked = savedInstanceState != null && configChangeUnlocked
+        configChangeUnlocked = false
+        locked = deviceSecure && app.prefs.onboarded && !keepUnlocked
         // Recreated (rotation, process death): the launch intent was already handled, don't open Add card again.
         handleIntent(intent, shortcuts = savedInstanceState == null)
 
@@ -223,7 +229,7 @@ class MainActivity : FragmentActivity() {
                                             onAdd = { nav.navigate("edit/0") },
                                             onAddWith = { start -> nav.navigate(start?.let { "edit/0?start=$it" } ?: "edit/0") },
                                             onEdit = { nav.navigate("edit/$it") },
-                                            onLock = { locked = true },
+                                            onLock = { FlipBack.clear(); locked = true },
                                             onSettings = { nav.navigate("settings") },
                                             onPin = { c, pin, replacing -> app.repo.setPinned(c, pin, replacing) },
                                             bottomBar = {},
@@ -405,6 +411,7 @@ class MainActivity : FragmentActivity() {
         }
         val timeoutMs = CardsApp.from(this).prefs.lockTimeoutSec * 1000L
         if (backgroundedAt > 0 && !Auth.inProgress && SystemClock.elapsedRealtime() - backgroundedAt >= timeoutMs) {
+            FlipBack.clear()
             locked = true
         }
         backgroundedAt = 0
@@ -412,6 +419,11 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!Auth.inProgress && !isChangingConfigurations) backgroundedAt = SystemClock.elapsedRealtime()
+        if (isChangingConfigurations) {
+            configChangeUnlocked = !locked
+        } else {
+            FlipBack.clear()
+            if (!Auth.inProgress) backgroundedAt = SystemClock.elapsedRealtime()
+        }
     }
 }

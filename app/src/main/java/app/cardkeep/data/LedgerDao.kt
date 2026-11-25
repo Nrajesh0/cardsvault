@@ -62,7 +62,7 @@ interface LedgerDao {
     @Query("DELETE FROM transactions WHERE statementId = :statementId")
     suspend fun deleteTxnsFor(statementId: Long)
 
-    @Query("UPDATE transactions SET categoryId = :categoryId WHERE merchant LIKE '%' || :pattern || '%'")
+    @Query("UPDATE transactions SET categoryId = :categoryId WHERE merchant LIKE '%' || :pattern || '%' ESCAPE '\\'")
     suspend fun recategorise(pattern: String, categoryId: Long?)
 
     @Query("SELECT * FROM transactions")

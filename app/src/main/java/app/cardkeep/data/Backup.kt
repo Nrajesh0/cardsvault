@@ -27,6 +27,9 @@ object Backup {
     private val MAGIC = "CARDSBK1".toByteArray()
     private const val ITERATIONS = 300_000
     private const val FORMAT = 1
+    private const val MAX_DECOMPRESSED_BYTES = 100_000_000
+    private val ALLOWED_LOCK_TIMEOUTS = setOf(0, 30, 60, 300)
+    private val ALLOWED_THEME_MODES = setOf("system", "light", "dark")
     private val PENDING_PDF_OUTCOMES = setOf("locked", "unmatched")
 
     class WrongPassword : Exception("Wrong password, or not a CardVault backup")
@@ -87,7 +90,19 @@ object Backup {
     private fun readInt(b: ByteArray, o: Int) =
         (b[o].toInt() and 0xFF shl 24) or (b[o + 1].toInt() and 0xFF shl 16) or (b[o + 2].toInt() and 0xFF shl 8) or (b[o + 3].toInt() and 0xFF)
     private fun gzip(b: ByteArray) = ByteArrayOutputStream().also { o -> GZIPOutputStream(o).use { it.write(b) } }.toByteArray()
-    private fun gunzip(b: ByteArray) = GZIPInputStream(ByteArrayInputStream(b)).use { it.readBytes() }
+    private fun gunzip(b: ByteArray): ByteArray = GZIPInputStream(ByteArrayInputStream(b)).use { input ->
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > MAX_DECOMPRESSED_BYTES) throw IllegalStateException("Backup is too large to restore.")
+            out.write(buf, 0, n)
+        }
+        out.toByteArray()
+    }
 
     // ---------- Export ----------
 
@@ -156,7 +171,9 @@ object Backup {
 
     fun parse(plain: ByteArray): Contents {
         val json = runCatching { JSONObject(String(plain)) }.getOrNull() ?: throw WrongPassword()
-        if (json.optInt("format") > FORMAT) throw IllegalStateException("This backup is from a newer version of CardVault. Update the app first.")
+        val fmt = json.optInt("format", -1)
+        if (fmt < 1) throw WrongPassword()
+        if (fmt > FORMAT) throw IllegalStateException("This backup is from a newer version of CardVault. Update the app first.")
         return Contents(json)
     }
 
@@ -256,10 +273,15 @@ object Backup {
         }
 
         j.optJSONObject("prefs")?.let { p ->
-            prefs.lockTimeoutSec = p.optInt("lockTimeoutSec", prefs.lockTimeoutSec)
-            prefs.defaultLeads = p.optString("defaultLeads", prefs.defaultLeads)
-            prefs.palette = p.optString("palette", prefs.palette)
-            prefs.themeMode = p.optString("themeMode", prefs.themeMode)
+            val timeout = p.optInt("lockTimeoutSec", prefs.lockTimeoutSec)
+            if (timeout in ALLOWED_LOCK_TIMEOUTS) prefs.lockTimeoutSec = timeout
+            p.optString("defaultLeads", "").takeIf { it.isNotBlank() }?.let { raw ->
+                val cleaned = app.cardkeep.domain.Billing.parseLeads(raw).joinToString(",")
+                if (cleaned.isNotEmpty()) prefs.defaultLeads = cleaned
+            }
+            p.optString("palette", "").takeIf { it.isNotBlank() }?.let { prefs.palette = it }
+            val mode = p.optString("themeMode", prefs.themeMode)
+            if (mode in ALLOWED_THEME_MODES) prefs.themeMode = mode
         }
         return cards.size
     }

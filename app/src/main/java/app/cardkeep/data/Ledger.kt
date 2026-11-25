@@ -252,7 +252,8 @@ class Ledger(private val dao: LedgerDao, private val onCardChanged: suspend (Lon
         if (!p.isNullOrBlank() && categoryId != null) {
             dao.deleteRulesFor(p)
             dao.insertRule(CategoryRule(categoryId = categoryId, pattern = p, priority = DefaultCategories.USER_PRIORITY))
-            dao.recategorise(p, categoryId)
+            val escaped = p.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            dao.recategorise(escaped, categoryId)
         }
     }
 

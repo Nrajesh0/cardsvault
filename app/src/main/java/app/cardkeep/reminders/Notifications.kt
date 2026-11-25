@@ -57,6 +57,13 @@ object Notifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        val publicVersion = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_card)
+            .setContentTitle("CardVault")
+            .setContentText("Payment reminder")
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .build()
+
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_card)
             .setColor(c.color.toInt())
@@ -65,6 +72,7 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
             .setContentIntent(open)
             .setAutoCancel(true)
             .addAction(0, "Mark as paid", ActionReceiver.intent(context, ActionReceiver.ACTION_PAID, c.id, dueEpoch))
@@ -93,12 +101,19 @@ object Notifications {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val publicVersion = NotificationCompat.Builder(context, CHANNEL_STATEMENTS)
+            .setSmallIcon(R.drawable.ic_stat_card)
+            .setContentTitle("CardVault")
+            .setContentText("Statement imported")
+            .build()
+
         val n = NotificationCompat.Builder(context, CHANNEL_STATEMENTS)
             .setSmallIcon(R.drawable.ic_stat_card)
             .setColor(card.color.toInt())
             .setContentTitle(title)
             .setContentText(text)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()

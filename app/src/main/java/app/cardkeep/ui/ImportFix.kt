@@ -158,17 +158,38 @@ fun rememberPdfImporter(onOutcome: (StatementImporter.Outcome) -> Unit): () -> U
     return { launcher.launch(arrayOf("application/pdf")) }
 }
 
+private const val MAX_PDF_BYTES = 20_000_000
+
+/** Reads at most [maxBytes] from [input]; returns null if the stream exceeds the limit. */
+internal fun readBounded(input: java.io.InputStream, maxBytes: Int): ByteArray? {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    var total = 0
+    while (true) {
+        val n = input.read(buf)
+        if (n < 0) break
+        total += n
+        if (total > maxBytes) return null
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
+}
+
 /** Reads a content URI (picked or shared) and imports it. The PDF only lives in memory and the encrypted DB. */
 suspend fun importUri(context: Context, uri: Uri): StatementImporter.Outcome {
+    var tooLarge = false
     val read = withContext(Dispatchers.IO) {
         runCatching {
             val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                 if (c.moveToFirst()) c.getString(0) else null
             } ?: "statement.pdf"
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("empty")
+            val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
+                readBounded(stream, MAX_PDF_BYTES).also { if (it == null) tooLarge = true }
+            } ?: error("empty")
             name to bytes
         }.getOrNull()
-    } ?: return StatementImporter.Outcome("error", "Couldn't read that file.")
-    if (read.second.size > 20_000_000) return StatementImporter.Outcome("error", "That PDF is too large.")
+    }
+    if (tooLarge) return StatementImporter.Outcome("error", "That PDF is too large.")
+    if (read == null) return StatementImporter.Outcome("error", "Couldn't read that file.")
     return StatementImporter.importFile(context, read.first, read.second)
 }

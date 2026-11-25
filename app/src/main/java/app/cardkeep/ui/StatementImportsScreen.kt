@@ -130,7 +130,8 @@ fun StatementImportsScreen(
         }
     }
 
-    fixing?.let { e ->
+    val locked = LocalLocked.current
+    fixing?.takeIf { !locked }?.let { e ->
         ImportFixDialog(
             entry = e,
             cards = cards,

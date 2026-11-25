@@ -123,7 +123,7 @@ object StatementImporter {
 
     private fun matchCard(cards: List<Card>, allCards: List<Card>, last4: String?, text: String): Card? {
         if (last4 != null) return cards.firstOrNull { it.last4 == last4 } ?: allCards.singleOrNull { it.last4 == last4 }
-        val mentioned = cards.filter { c -> Regex("(?<!\\d)${c.last4}(?!\\d)").containsMatchIn(text) }
+        val mentioned = cards.filter { c -> c.last4.isNotBlank() && Regex("(?<!\\d)${Regex.escape(c.last4)}(?!\\d)").containsMatchIn(text) }
         if (mentioned.size == 1) return mentioned[0]
         return cards.singleOrNull()
     }
