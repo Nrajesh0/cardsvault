@@ -1,0 +1,115 @@
+# Runs when versionName changes on main, or manually: Actions → "Build and release APK" → Run workflow.
+# Builds the signed release APK and publishes it as a GitHub release.
+#
+# Needs these repository secrets (Settings → Secrets and variables → Actions):
+#   RELEASE_KEYSTORE_BASE64  base64 of release.jks
+#   RELEASE_STORE_PASSWORD   keystore password
+#   RELEASE_KEY_ALIAS        key alias
+#   RELEASE_KEY_PASSWORD     key password
+# Use the same keystore as local builds, so the APK installs over the existing app.
+name: Build and release APK
+
+on:
+  # Bumping versionName in app/build.gradle.kts and pushing to main releases that version.
+  # Pushes that leave versionName at an already-released version do nothing.
+  push:
+    branches: [main]
+    paths: [app/build.gradle.kts]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (blank = v<versionName>, or v<versionName>-<run number> if that exists)"
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark as pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history: versionCode is the commit count.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # On a push, only release when this versionName hasn't been released yet.
+      - name: Check version
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v5
+        if: steps.check.outputs.skip != 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No wrapper in the repo; same Gradle as build.ps1.
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Signing key
+        if: steps.check.outputs.skip != 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Signing secrets are missing (see the top of this workflow)."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build
+        if: steps.check.outputs.skip != 'true'
+        run: gradle :app:assembleRelease --no-daemon --console=plain
+
+      - name: Release
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          test -f "$apk" || { echo "::error::No signed APK at $apk"; exit 1; }
+          version=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          tag="${INPUT_TAG:-v${version}}"
+          # Same versionName released before: keep the tag unique.
+          if [ -z "$INPUT_TAG" ] && gh release view "$tag" >/dev/null 2>&1; then tag="${tag}-${GITHUB_RUN_NUMBER}"; fi
+          name="CardVault_${tag}.apk"
+          cp "$apk" "$name"
+          flags=()
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$tag" "$name" --target "$GITHUB_SHA" --title "CardVault $tag" --generate-notes "${flags[@]}"
+
+      - name: Clean up signing files
+        if: always()
+        run: rm -f release.jks keystore.properties

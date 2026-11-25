@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_bg">#FF1D2249</color>
+    <style name="Theme.Cards" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0E1016</item>
+        <item name="android:colorAccent">#FF8EA2FF</item>
+    </style>
+    <!-- Invisible host for the fingerprint prompt behind an autofill suggestion. -->
+    <style name="Theme.Cards.Unlock" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>
